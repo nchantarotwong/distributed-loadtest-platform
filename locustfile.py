@@ -3,10 +3,28 @@ Locust workload modeling a read-heavy service with occasional CPU pressure.
 
 Intended to demonstrate distributed load generation patterns rather than
 synthetic hello-world traffic.
+
+Profiles are selected via TEST_PROFILE to enable repeatable, headless runs.
 """
 
-from locust import HttpUser, task, between
+import os
 import random
+from locust import HttpUser, task, between
+
+
+PROFILES = {
+    "smoke":   {"users": 10,  "spawn_rate": 2,  "duration_s": 30},
+    "baseline": {"users": 50,  "spawn_rate": 5,  "duration_s": 300},
+    "spike":   {"users": 200, "spawn_rate": 50, "duration_s": 60},
+}
+
+
+def get_profile() -> dict:
+    name = os.getenv("TEST_PROFILE", "smoke").strip().lower()
+    if name not in PROFILES:
+        name = "smoke"
+
+    return {"name": name, **PROFILES[name]}
 
 
 class DemoUser(HttpUser):

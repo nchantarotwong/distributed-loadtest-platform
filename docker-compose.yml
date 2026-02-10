@@ -36,10 +36,13 @@ services:
         condition: service_healthy
     ports:
       - "8089:8089"
+      - "5557:5557"
+      - "5558:5558"
     command:
       - -f
       - /mnt/locust/locustfile.py
       - --master
+      - --master-bind-host=0.0.0.0
       - --host=${BASE_URL:-http://demo-target:8000}
       - --web-host=0.0.0.0
 
@@ -53,6 +56,37 @@ services:
       - /mnt/locust/locustfile.py
       - --worker
       - --master-host=locust-master
+      - --master-port=5557
+
+  locust-runner:
+    <<: *locust-common
+    profiles: ["runner"]
+    depends_on:
+      demo-target:
+        condition: service_healthy
+    command:
+      - -f
+      - /mnt/locust/locustfile.py
+      - --headless
+      - --host=${BASE_URL:-http://demo-target:8000}
+      - -u
+      - "${LOCUST_USERS:-10}"
+      - -r
+      - "${LOCUST_SPAWN_RATE:-2}"
+      - -t
+      - "${LOCUST_DURATION:-30s}"
+      - --csv
+      - /artifacts/locust
+      - --csv-full-history
+
+  locust-exporter:
+    image: containersol/locust_exporter:latest
+    depends_on:
+      - locust-master
+    ports:
+      - "9646:9646"
+    environment:
+      - LOCUST_EXPORTER_URI=http://locust-master:8089
 
   prometheus:
     image: prom/prometheus:v3.9.1
