@@ -19,6 +19,10 @@ PROFILES = {
 }
 
 
+def env_bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def get_profile() -> dict:
     name = os.getenv("TEST_PROFILE", "smoke").strip().lower()
     if name not in PROFILES:
@@ -35,11 +39,14 @@ def validate_profile(environment, **_kwargs):
     spawn = int(os.getenv("LOCUST_SPAWN_RATE", profile["spawn_rate"]))
 
     if users != profile["users"] or spawn != profile["spawn_rate"]:
-        print(
-            "\nWARNING: LOCUST_* values do not match TEST_PROFILE defaults.\n"
-            f"TEST_PROFILE={profile['name']} expects users={profile['users']} spawn_rate={profile['spawn_rate']}\n"
+        failure_str = "\nLOCUST_* values do not match TEST_PROFILE defaults.\n" +\
+            f"TEST_PROFILE={profile['name']} expects users={profile['users']} spawn_rate={profile['spawn_rate']}\n" +\
             f"but got LOCUST_USERS={users} LOCUST_SPAWN_RATE={spawn}\n"
-        )
+
+        if env_bool("STRICT_PROFILES") or env_bool("CI"):
+            raise RuntimeError(failure_str)
+        else:
+            print(f"\nWARNING: {failure_str}")
 
 
 @events.test_start.add_listener
