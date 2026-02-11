@@ -1,0 +1,120 @@
+x-locust-common: &locust-common
+  image: locustio/locust:2.43.2
+  environment:
+    - TEST_PROFILE=${TEST_PROFILE:-smoke}
+    - ARTIFACT_DIR=/artifacts
+  volumes:
+    - ./locustfile.py:/mnt/locust/locustfile.py:ro
+    - ./artifacts:/artifacts
+
+services:
+  demo-target:
+    build:
+      context: ./demo-target
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+    environment:
+      - REQUIRE_AUTH=false
+      - BASE_LATENCY_MS=5
+      - JITTER_LATENCY_MS=15
+      - TAIL_PROB=0.02
+      - TAIL_MIN_MS=200
+      - TAIL_MAX_MS=600
+      - ERROR_429_PROB=0.005
+      - ERROR_500_PROB=0.002
+      - CPU_ITERATIONS=40000
+
+  locust-master:
+    <<: *locust-common
+    depends_on:
+      demo-target:
+        condition: service_healthy
+    ports:
+      - "8089:8089"
+      - "5557:5557"
+      - "5558:5558"
+    command:
+      - -f
+      - /mnt/locust/locustfile.py
+      - --master
+      - --master-bind-host=0.0.0.0
+      - --host=${BASE_URL:-http://demo-target:8000}
+      - --web-host=0.0.0.0
+
+  locust-worker:
+    <<: *locust-common
+    depends_on:
+      locust-master:
+        condition: service_started
+    command:
+      - -f
+      - /mnt/locust/locustfile.py
+      - --worker
+      - --master-host=locust-master
+      - --master-port=5557
+
+  locust-runner:
+    <<: *locust-common
+    profiles: ["runner"]
+    depends_on:
+      demo-target:
+        condition: service_healthy
+    command:
+      - -f
+      - /mnt/locust/locustfile.py
+      - --headless
+      - --host=${BASE_URL:-http://demo-target:8000}
+      - -u
+      - "${LOCUST_USERS:-10}"
+      - -r
+      - "${LOCUST_SPAWN_RATE:-2}"
+      - -t
+      - "${LOCUST_DURATION:-30s}"
+      - --csv
+      - /artifacts/locust
+      - --csv-full-history
+
+  locust-exporter:
+    image: containersol/locust_exporter:latest
+    depends_on:
+      - locust-master
+    ports:
+      - "9646:9646"
+    environment:
+      - LOCUST_EXPORTER_URI=http://locust-master:8089
+
+  prometheus:
+    image: prom/prometheus:v3.9.1
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+
+  grafana:
+    image: grafana/grafana:12.3.2
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+
+volumes:
+  prometheus-data:
+  grafana-data:
