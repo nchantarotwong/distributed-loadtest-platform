@@ -15,3 +15,7 @@ venv.bak/
 
 # JetBrains
 .idea/
+
+# locust
+artifacts/*
+!artifacts/.gitkeep
