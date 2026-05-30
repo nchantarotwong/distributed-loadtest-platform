@@ -8,6 +8,27 @@
 - Support horizontal generator scaling
 - Remain portable across container runtimes
 
+## Screenshots
+
+A `baseline` run (60 users) against the bundled demo target. Note the visible
+tail: p95 ≈ 1.7s and p99 ≈ 2.3s while the median stays near 100ms — exactly the
+percentile spread that averages would hide.
+
+### Grafana — load test overview
+
+Real p95/p99 sourced from Locust's own stats engine (see
+[Observability](#observability)), plus per-endpoint latency.
+
+![Grafana load test overview](docs/images/grafana-overview.png)
+
+### Locust — live charts
+
+![Locust live charts](docs/images/locust-charts.png)
+
+### Locust — request statistics
+
+![Locust request statistics](docs/images/locust-statistics.png)
+
 ## Failure Modes in Load Testing
 
 Some failures make tests unrealistic.
@@ -78,6 +99,47 @@ Artifacts are intended to support regression detection and capacity comparison a
 
 - This mode is the fastest feedback loop for iteration and CI smoke runs.
 - Distributed mode is enabled even locally (master/worker).
+
+---
+
+## Observability
+
+The platform's thesis is that **percentile blindness** invalidates load tests,
+so real tail latency must be first-class — not approximated.
+
+### Real percentiles, straight from Locust
+
+The Locust master exposes a Prometheus endpoint at `:8089/metrics`
+(registered in `locustfile.py`, no extra dependencies). Percentiles come from
+Locust's own stats engine via `get_current_response_time_percentile`, so
+`locust_response_time_current_ms{quantile="0.95"}` is the *real* p95 — not the
+always-zero value the external `locust_exporter` reports for percentiles.
+
+Key metrics:
+
+| Metric | Meaning |
+|---|---|
+| `locust_response_time_current_ms{quantile}` | Sliding-window p50/p95/p99 (live) |
+| `locust_response_time_total_ms{quantile}` | Cumulative p50/p95/p99 over the run |
+| `locust_rps`, `locust_fail_ratio`, `locust_users` | Aggregate throughput / errors / load |
+| `locust_endpoint_p95_ms{name,method}` | Per-endpoint p95 |
+
+### Scrape topology
+
+Prometheus scrapes two jobs (`prometheus/prometheus.yml`):
+
+- `locust-native` → `locust-master:8089/metrics` — real percentiles (preferred)
+- `locust` → `locust-exporter:9646` — worker counts and request totals
+
+### Bounded cardinality
+
+`get_item` groups its 1000 random ids under the request name `/items/:id`, so
+Prometheus series stay bounded instead of exploding to ~1000 per-id entries.
+
+### Grafana
+
+The **Load Test Overview** dashboard is provisioned from
+`grafana/provisioning/dashboards/` and loads automatically — no manual import.
 
 ---
 

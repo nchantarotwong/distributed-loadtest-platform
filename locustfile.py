@@ -49,6 +49,87 @@ def validate_profile(environment, **_kwargs):
             print(f"\nWARNING: {failure_str}")
 
 
+QUANTILES = (0.5, 0.95, 0.99)
+
+
+def _render_metrics(environment) -> str:
+    """
+    Render Locust runner stats as Prometheus text exposition format.
+
+    Percentiles come straight from Locust's own stats engine, so p50/p95/p99
+    reflect real tail latency instead of the always-zero value the external
+    locust_exporter reports. No third-party deps required: the stock locust
+    image is enough because we format the exposition text by hand.
+
+    Two flavours of percentile are exposed:
+    - scope "current" (locust_response_time_current_ms): sliding window,
+      matching the live UI charts.
+    - scope "total" (locust_response_time_total_ms): cumulative over the whole
+      run, the headline number for capacity decisions.
+    """
+    stats = environment.runner.stats
+    total = stats.total
+    out = []
+
+    def emit(name, mtype, help_text, samples):
+        out.append(f"# HELP {name} {help_text}")
+        out.append(f"# TYPE {name} {mtype}")
+        for labels, value in samples:
+            label_str = f"{{{labels}}}" if labels else ""
+            out.append(f"{name}{label_str} {value}")
+
+    emit("locust_users", "gauge", "Simulated users currently running",
+         [("", environment.runner.user_count)])
+    emit("locust_requests_total", "gauge", "Total completed requests",
+         [("", total.num_requests)])
+    emit("locust_failures_total", "gauge", "Total failed requests",
+         [("", total.num_failures)])
+    emit("locust_rps", "gauge", "Current aggregate requests per second",
+         [("", total.current_rps)])
+    emit("locust_fail_per_sec", "gauge", "Current aggregate failures per second",
+         [("", total.current_fail_per_sec)])
+    emit("locust_fail_ratio", "gauge", "Aggregate failure ratio (0-1)",
+         [("", total.fail_ratio)])
+
+    # Response-time percentiles: the whole point of this platform.
+    emit("locust_response_time_current_ms", "gauge",
+         "Sliding-window response time percentile (ms)",
+         [(f'quantile="{q}"', total.get_current_response_time_percentile(q) or 0)
+          for q in QUANTILES])
+    emit("locust_response_time_total_ms", "gauge",
+         "Cumulative response time percentile over the run (ms)",
+         [(f'quantile="{q}"', total.get_response_time_percentile(q) or 0)
+          for q in QUANTILES])
+    emit("locust_response_time_avg_ms", "gauge", "Average response time (ms)",
+         [("", total.avg_response_time)])
+    emit("locust_response_time_max_ms", "gauge", "Max response time (ms)",
+         [("", total.max_response_time)])
+
+    # Per-endpoint breakdown. Cardinality stays bounded because get_item groups
+    # its 1000 ids under a single name (see DemoUser.get_item).
+    endpoints = [e for e in stats.entries.values()]
+    emit("locust_endpoint_rps", "gauge", "Current requests per second per endpoint",
+         [(f'method="{e.method}",name="{e.name}"', e.current_rps) for e in endpoints])
+    emit("locust_endpoint_p95_ms", "gauge", "Sliding-window p95 latency per endpoint (ms)",
+         [(f'method="{e.method}",name="{e.name}"',
+           e.get_current_response_time_percentile(0.95) or 0) for e in endpoints])
+
+    return "\n".join(out) + "\n"
+
+
+@events.init.add_listener
+def register_metrics_endpoint(environment, **_kwargs):
+    """Expose /metrics on the Locust master web UI for Prometheus to scrape."""
+    if environment.web_ui is None:
+        return  # workers and headless runs have no web UI
+
+    from flask import Response
+
+    @environment.web_ui.app.route("/metrics")
+    def prometheus_metrics():
+        return Response(_render_metrics(environment), mimetype="text/plain")
+
+
 @events.test_start.add_listener
 def announce_profile(environment, **_kwargs):
     profile = get_profile()
@@ -84,7 +165,9 @@ class DemoUser(HttpUser):
     @tag("read")
     def get_item(self):
         item_id = random.randint(1, 1000)
-        self.client.get(f"/items/{item_id}")
+        # Group all ids under one name so Prometheus series stay bounded
+        # instead of exploding to ~1000 per-id entries.
+        self.client.get(f"/items/{item_id}", name="/items/:id")
 
     @task(1)
     @tag("compute")
