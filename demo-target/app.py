@@ -6,6 +6,7 @@ The service intentionally supports latency injection, tail behavior,
 error simulation, and optional authentication to model realistic
 production failure modes.
 """
+import asyncio
 import hashlib
 import os
 import random
@@ -70,14 +71,24 @@ def _sleep_ms(ms: int) -> None:
     time.sleep(ms / 1000.0)
 
 
-def _maybe_inject_latency() -> None:
-    # Inject baseline + jitter, with occasional tail amplification.
-    base = BASE_LATENCY_MS
-    jitter = random.randint(0, max(0, JITTER_LATENCY_MS))
-    _sleep_ms(base + jitter)
-
+def _latency_budget_ms() -> int:
+    # Baseline + jitter, with occasional tail amplification.
+    total = BASE_LATENCY_MS + random.randint(0, max(0, JITTER_LATENCY_MS))
     if random.random() < TAIL_PROB:
-        _sleep_ms(random.randint(TAIL_MIN_MS, TAIL_MAX_MS))
+        total += random.randint(TAIL_MIN_MS, TAIL_MAX_MS)
+    return total
+
+
+async def _maybe_inject_latency_async() -> None:
+    # MUST be awaited, not slept. This runs in the request middleware on the
+    # event loop; a blocking time.sleep() here would serialize every in-flight
+    # request and fabricate tail latency that has nothing to do with the
+    # configured model -- the exact "test that silently invalidates results"
+    # this platform exists to avoid. asyncio.sleep yields the loop so requests
+    # actually run concurrently.
+    ms = _latency_budget_ms()
+    if ms > 0:
+        await asyncio.sleep(ms / 1000.0)
 
 
 def _maybe_inject_errors() -> None:
@@ -105,7 +116,7 @@ async def request_middleware(request: Request, call_next):
     if request.url.path in ("/health", "/metrics"):
         return await call_next(request)
 
-    _maybe_inject_latency()
+    await _maybe_inject_latency_async()
     try:
         _maybe_inject_errors()
     except HTTPException as exc:

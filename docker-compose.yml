@@ -80,7 +80,11 @@ services:
       - --csv-full-history
 
   locust-exporter:
-    image: containersol/locust_exporter:latest
+    # Pinned by digest for reproducibility (the only third-party image without a
+    # version tag). Note: this exporter's response-time percentile metrics are
+    # unreliable -- prefer locust_response_time_* from the locust master's
+    # /metrics endpoint (see locustfile.py and prometheus.yml).
+    image: containersol/locust_exporter@sha256:51ff85946620f0a95efab9050e96d448fa33a4979faba260786cb36eb2e60764
     depends_on:
       - locust-master
     ports:

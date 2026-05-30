@@ -11,8 +11,8 @@
 ## Screenshots
 
 A `baseline` run (60 users) against the bundled demo target. Note the visible
-tail: p95 ≈ 1.7s and p99 ≈ 2.3s while the median stays near 100ms — exactly the
-percentile spread that averages would hide.
+tail: median ≈ 19ms and p95 ≈ 40ms, while p99 ≈ 410ms from the 2% injected
+tail — exactly the percentile spread that averages would hide.
 
 ### Grafana — load test overview
 
