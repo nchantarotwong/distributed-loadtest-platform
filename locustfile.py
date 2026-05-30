@@ -9,6 +9,7 @@ Profiles are selected via TEST_PROFILE to enable repeatable, headless runs.
 
 import os
 import random
+import re
 from locust import between, events, HttpUser, tag, task
 
 
@@ -21,6 +22,20 @@ PROFILES = {
 
 def env_bool(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_duration_s(value: str) -> int | None:
+    """
+    Parse a Locust-style duration ("30s", "5m", "1h30m") into seconds.
+
+    Returns None if the string can't be parsed so the caller can skip the
+    duration check rather than raise on an unexpected format.
+    """
+    matches = re.findall(r"(\d+)\s*([smh])", value.strip().lower())
+    if not matches:
+        return None
+    unit_s = {"s": 1, "m": 60, "h": 3600}
+    return sum(int(n) * unit_s[u] for n, u in matches)
 
 
 def get_profile() -> dict:
@@ -38,10 +53,17 @@ def validate_profile(environment, **_kwargs):
     users = int(os.getenv("LOCUST_USERS", profile["users"]))
     spawn = int(os.getenv("LOCUST_SPAWN_RATE", profile["spawn_rate"]))
 
-    if users != profile["users"] or spawn != profile["spawn_rate"]:
+    # Duration is optional and only compared when it parses to a known format.
+    duration_env = os.getenv("LOCUST_DURATION")
+    duration_s = parse_duration_s(duration_env) if duration_env else None
+    duration_mismatch = duration_s is not None and duration_s != profile["duration_s"]
+
+    if users != profile["users"] or spawn != profile["spawn_rate"] or duration_mismatch:
         failure_str = "\nLOCUST_* values do not match TEST_PROFILE defaults.\n" +\
-            f"TEST_PROFILE={profile['name']} expects users={profile['users']} spawn_rate={profile['spawn_rate']}\n" +\
-            f"but got LOCUST_USERS={users} LOCUST_SPAWN_RATE={spawn}\n"
+            f"TEST_PROFILE={profile['name']} expects users={profile['users']} "\
+            f"spawn_rate={profile['spawn_rate']} duration_s={profile['duration_s']}\n" +\
+            f"but got LOCUST_USERS={users} LOCUST_SPAWN_RATE={spawn} "\
+            f"LOCUST_DURATION={duration_env}\n"
 
         if env_bool("STRICT_PROFILES") or env_bool("CI"):
             raise RuntimeError(failure_str)

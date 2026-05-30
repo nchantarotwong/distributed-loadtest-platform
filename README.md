@@ -71,7 +71,17 @@ Run the stack (master + workers):
 docker compose up --build --scale locust-worker=2
 ```
 
-Podman users can replace docker compose with podman-compose.
+The same commands work across Compose implementations — use whichever is
+installed:
+
+| Runtime | Command prefix |
+|---|---|
+| Docker Compose V2 plugin | `docker compose` |
+| Standalone Compose binary | `docker-compose` |
+| Podman | `podman-compose` |
+
+If `docker compose` reports `unknown command`, the V2 plugin isn't installed;
+use `docker-compose` or `podman-compose` instead.
 
 ### Access the UIs
 

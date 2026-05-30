@@ -19,6 +19,7 @@ services:
       timeout: 2s
       retries: 20
     environment:
+      - UVICORN_WORKERS=${TARGET_WORKERS:-2}
       - REQUIRE_AUTH=false
       - BASE_LATENCY_MS=5
       - JITTER_LATENCY_MS=15
