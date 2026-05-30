@@ -6,6 +6,15 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
+  # Real percentiles straight from Locust's stats engine (see locustfile.py).
+  - job_name: "locust-native"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["locust-master:8089"]
+
+  # External exporter retained for worker counts and request totals. Note: its
+  # response-time percentile metrics are unreliable (often 0); prefer
+  # locust_response_time_* from the locust-native job above.
   - job_name: "locust"
     static_configs:
       - targets: ["locust-exporter:9646"]
